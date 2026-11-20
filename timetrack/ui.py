@@ -50,13 +50,14 @@ class ProjectPicker(Gtk.Box):
         self.projects = projects
         self.none_label = none_label
         self.on_activate = on_activate
-        self._pristine = True  # entry still shows the untouched default
+        self.default = default  # highlighted while the entry is empty
 
         self.entry = Gtk.Entry()
-        self.entry.set_placeholder_text("Type to filter or enter a new project name")
-        self.entry.set_activates_default(False)
         if default:
-            self.entry.set_text(default)
+            self.entry.set_placeholder_text(f"Enter = \u201c{default}\u201d, or type to filter / add new")
+        else:
+            self.entry.set_placeholder_text("Type to filter or enter a new project name")
+        self.entry.set_activates_default(False)
         self.entry.connect("changed", self._on_changed)
         self.entry.connect("key-press-event", self._on_key)
         self.entry.connect("activate", lambda *_: self._activate(exact=False))
@@ -95,7 +96,7 @@ class ProjectPicker(Gtk.Box):
     def _refill(self):
         for child in self.listbox.get_children():
             self.listbox.remove(child)
-        text = "" if self._pristine else self.entry.get_text()
+        text = self.entry.get_text()
         if self.none_label and not text.strip():
             self._add_row("none", None, self.none_label, italic=True)
         matches = rank_projects(self.projects, text)
@@ -105,12 +106,12 @@ class ProjectPicker(Gtk.Box):
         if typed and not any(p.casefold() == typed.casefold() for p in self.projects):
             self._add_row("new", typed, f"+ New project: “{typed}”", italic=True)
         self.listbox.show_all()
-        first = self.listbox.get_row_at_index(0)
-        if first:
-            self.listbox.select_row(first)
+        rows = self.listbox.get_children()
+        if rows:
+            preferred = [r for r in rows if r.value == self.default] if not text.strip() else []
+            self.listbox.select_row((preferred or rows)[0])
 
     def _on_changed(self, *_):
-        self._pristine = False
         self._refill()
 
     def _move(self, delta: int):
@@ -233,7 +234,6 @@ class PromptWindow(Gtk.Window):
 
         self.show_all()
         self.picker.entry.grab_focus()
-        self.picker.entry.select_region(0, -1)
         self.present_with_time(Gtk.get_current_event_time() or Gdk.CURRENT_TIME)
 
     def _finish(self):
