@@ -3,9 +3,9 @@
 A small, prompt-based time tracker for the Linux desktop (built for Ubuntu 26.04 / GNOME).
 
 Every *N* minutes a popup asks **"What are you working on?"**. The last project is
-pre-selected, so if nothing changed you just press **Enter**. Start typing and the list
-of previous projects (most recently used first) filters as you type. When you step away
-from the computer, recording stops automatically at your last keyboard/mouse activity.
+highlighted, so if nothing changed you just press **Enter**. Start typing and the list
+of previous projects (most recently used first) filters as you type. If you don't answer
+(because you've stepped away), recording stops at the moment the popup appeared.
 Everything is stored in a plain CSV file.
 
 ## Install
@@ -36,7 +36,7 @@ enabled by default on Ubuntu. On a stock (non-Ubuntu) GNOME, install the
 
 | Key | Action |
 |---|---|
-| **Enter** | use the highlighted project (initially your last project) |
+| **Enter** | use the highlighted project (initially your last project; the text box starts empty) |
 | type | filter the list (prefix matches first, then anything containing the text) |
 | **↑ / ↓**, PgUp/PgDn | move the highlight |
 | **Shift+Enter** | use exactly what you typed (e.g. a new project whose name is part of an existing one) |
@@ -45,24 +45,22 @@ enabled by default on Ubuntu. On a stock (non-Ubuntu) GNOME, install the
 Typing a name that doesn't exist offers **+ New project: "…"**. The **Stop tracking**
 button turns tracking off (see below).
 
-Your answer applies **from the moment the popup appeared**. Until you answer, time keeps
-going to the previous project, and the popup stays open.
+Your answer applies **from the moment the popup appeared**. For the first
+`response_timeout_seconds` (default 60), time keeps going to the previous project while
+the popup waits for you.
 
-### Idle / away
+### Unanswered prompts (away)
 
-The session's idle time is read from GNOME (Mutter's IdleMonitor D-Bus API, which works on
-Wayland), falling back to `org.freedesktop.ScreenSaver` (KDE) or `xprintidle` (X11).
-When there has been no keyboard/mouse input for `idle_threshold_seconds` (default 60),
-the current entry is closed **at the time of your last activity**. Suspend/resume is
-treated the same way.
+There is no keyboard/mouse idle detection. Instead, if a popup is still unanswered after
+`response_timeout_seconds`, you're treated as away: the previous project's entry is
+closed **at the moment the popup appeared**, nothing more is recorded, and the popup stays
+open until you answer. No further popups appear in the meantime. Suspend/resume works the
+same way, with the entry ending when the machine went to sleep.
 
-When you come back, you're prompted right away. With `on_return = "assign"` (the default),
-the popup also says *"You were away 14:02–14:47 (45 min)"* and lets you log that period to
-a project (e.g. a meeting); leave it on *Don't log away time* to drop it. With
-`on_return = "prompt"`, away time is never logged.
-
-If no idle detection is available at all, an unanswered popup is treated as "away" after
-`idle_threshold_seconds`, counted from when the popup appeared.
+When you answer, the new entry starts at that moment. With `offer_to_log_away_time = true`
+(the default), the popup also says *"No answer since 14:02 — not recording"* and lets you
+log the time from then until your answer to a project (e.g. a meeting). Leave it on
+*Don't log away time* to drop it.
 
 ### Turning it on/off
 
@@ -77,7 +75,7 @@ you right away.
 timetrack                 start the background tracker (done automatically at login)
 timetrack on | off | toggle
 timetrack ask             show the prompt now
-timetrack status          on/off, current project, next prompt, idle backend
+timetrack status          on/off, current project, time until next prompt
 timetrack report [PERIOD] totals per project; PERIOD = today (default) | yesterday |
                           week | lastweek | month | all | YYYY-MM-DD | YYYY-MM-DD..YYYY-MM-DD
 timetrack quit            stop the tracker until next login (on/off mode is kept)
@@ -91,8 +89,8 @@ The tray menu also has **Report…**, **Open log file** and **Edit settings**.
 
 ```toml
 prompt_interval_minutes = 15
-idle_threshold_seconds = 60
-on_return = "assign"          # or "prompt"
+response_timeout_seconds = 60   # unanswered this long = away (entry ends at prompt time)
+offer_to_log_away_time = true   # offer to log the unanswered stretch to a project
 show_project_in_panel = true  # show the project name next to the tray icon
 log_file = ""                 # default: ~/.local/share/timetrack/log.csv
 ```
@@ -116,8 +114,9 @@ log_file = ""                 # default: ~/.local/share/timetrack/log.csv
 
 GNOME on Wayland doesn't let background apps steal keyboard focus. The popup opens on top
 of other windows, but GNOME may sometimes show a *"Timetrack is ready"* notification
-instead of focusing it. Click the popup (or the notification) before typing. Pressing Enter
-is never required for time to keep counting.
+instead of focusing it. Click the popup (or the notification) before typing. Since an
+unanswered popup stops the clock, raise `response_timeout_seconds` if 60 s is too short
+to notice it.
 
 ## Development
 

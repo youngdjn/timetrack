@@ -19,8 +19,8 @@ class Clock:
 class Base(unittest.TestCase):
     def setUp(self):
         self.dir = Path(tempfile.mkdtemp())
-        self.cfg = Config(prompt_interval_minutes=15, idle_threshold_seconds=60,
-                          on_return="assign", log_file=str(self.dir / "log.csv"))
+        self.cfg = Config(prompt_interval_minutes=15, response_timeout_seconds=60,
+                          offer_to_log_away_time=True, log_file=str(self.dir / "log.csv"))
         self.clock = Clock()
         self.state = StateStore(self.dir / "state.json")
         self.shown = []
@@ -36,13 +36,12 @@ class Base(unittest.TestCase):
         t.on_hide_prompt = hide
         return t
 
-    def advance(self, seconds, idle=0.0, step=5):
-        """Advance time, ticking every `step` seconds; `idle` is a function or a constant
-        giving the session idle time at each tick."""
+    def advance(self, seconds, step=5):
+        """Advance time, ticking every `step` seconds."""
         end = self.clock.t + seconds
         while self.clock.t < end:
             self.clock.t = min(end, self.clock.t + step)
-            self.t.tick(idle(self.clock.t) if callable(idle) else idle)
+            self.t.tick()
 
     def rows(self):
         return [(round(s - 1_000_000), round(e - 1_000_000), p)
@@ -72,41 +71,58 @@ class TrackerTests(Base):
         self.assertEqual(self.rows(), [(0, round(prompt_time - 1_000_000), "alpha")])
         self.assertEqual(self.t.current_project, "beta")
 
-    def test_unanswered_prompt_keeps_previous_project(self):
+    def test_prompt_answered_within_timeout_keeps_previous_project(self):
         self.t.start()
         self.t.answer("alpha")
-        self.advance(15 * 60 + 300)  # prompt open, user active, no answer
+        self.advance(15 * 60 + 50)  # prompt open 50 s, still within the 60 s timeout
         self.assertEqual(self.t.current_project, "alpha")
         self.assertEqual(self.t.mode, "active")
-        self.t.answer(None)  # Esc
+        self.t.answer(None)  # Enter on the highlighted previous project / Esc
         self.assertEqual(self.t.current_project, "alpha")
         self.assertEqual(self.rows(), [])
 
-    def test_idle_ends_segment_at_last_activity_and_return_prompts_with_away(self):
+    def test_unanswered_prompt_ends_segment_at_prompt_time(self):
         self.t.start()
         self.t.answer("alpha")
-        last_activity = self.clock.t + 600
-        self.advance(900, idle=lambda now: max(0, now - last_activity))
-        self.assertEqual(self.t.mode, "idle")
-        self.assertEqual(self.rows(), [(0, 600, "alpha")])
-        # User comes back.
-        self.advance(5, idle=0)
-        self.assertEqual(self.t.mode, "active")
-        self.assertEqual(self.t.current_project, "alpha")
-        p = self.shown[-1]
-        self.assertEqual(round(p.away[0] - 1_000_000), 600)
-        self.assertEqual(round(p.away[1] - 1_000_000), 905)
+        self.advance(15 * 60 + 600)  # nobody answers for 10 minutes
+        self.assertEqual(self.t.mode, "away")
+        self.assertEqual(self.rows(), [(0, 900, "alpha")])
+        self.assertIsNone(self.t.current_project)
+        # The prompt was re-shown offering to log the away time; no new prompts meanwhile.
+        self.assertEqual(round(self.shown[-1].away[0] - 1_000_000), 900)
+        n = len(self.shown)
+        self.advance(3600)
+        self.assertEqual(len(self.shown), n)
+        # User answers: new entry starts now, away time logged to "meeting".
+        answered = round(self.clock.t - 1_000_000)
         self.t.answer("alpha", away_project="meeting")
-        self.assertIn((600, 905, "meeting"), self.rows())
+        self.assertEqual(self.t.mode, "active")
+        self.assertIn((900, answered, "meeting"), self.rows())
+        self.assertEqual(round(self.state["open_segment"]["start"] - 1_000_000), answered)
         self.assertEqual(self.t.projects()[:2], ["alpha", "meeting"])
 
-    def test_return_mode_prompt_has_no_away(self):
-        self.cfg.on_return = "prompt"
+    def test_unanswered_without_logging_away_time(self):
+        self.cfg.offer_to_log_away_time = False
         self.t.start()
         self.t.answer("alpha")
-        self.advance(200, idle=lambda now: now - 1_000_000)
-        self.advance(5, idle=0)
+        self.advance(15 * 60 + 120)
         self.assertIsNone(self.shown[-1].away)
+        self.t.answer(None)
+        self.assertEqual(self.rows(), [(0, 900, "alpha")])
+        self.assertEqual(self.t.current_project, "alpha")
+
+    def test_startup_prompt_unanswered(self):
+        self.t.start()
+        self.t.answer("alpha")
+        self.t.shutdown()
+        self.clock.t += 3600
+        self.t = self.make()
+        self.t.start()  # login: keeps "alpha" going while the prompt is open
+        self.advance(120)
+        self.assertEqual(self.t.mode, "away")
+        # "alpha" ended when the login prompt appeared, so nothing was recorded.
+        self.assertEqual(self.rows(), [])
+        self.assertEqual(self.shown[-1].default, "alpha")
 
     def test_off_persists_and_stops_recording(self):
         self.t.start()
@@ -141,22 +157,14 @@ class TrackerTests(Base):
         self.assertEqual(self.rows(), [(0, round(checkpoint - 1_000_000), "alpha")])
         self.assertEqual(self.t.mode, "active")  # was on before reboot
 
-    def test_suspend_gap_counts_as_idle(self):
+    def test_suspend_gap_counts_as_away(self):
         self.t.start()
         self.t.answer("alpha")
         self.advance(100)
         self.clock.t += 3600  # suspended
-        self.t.tick(0.0)
+        self.t.tick()
         self.assertEqual(self.rows(), [(0, 100, "alpha")])
-        self.t.tick(0.0)
-        self.assertEqual(self.t.mode, "active")
-
-    def test_no_idle_backend_falls_back_to_unanswered_prompt(self):
-        self.t.start()
-        self.t.answer("alpha")
-        self.advance(15 * 60 + 120, idle=None)
-        self.assertEqual(self.t.mode, "idle")
-        self.assertEqual(self.rows(), [(0, 900, "alpha")])
+        self.assertEqual(self.t.mode, "away")
         self.t.answer(None)
         self.assertEqual(self.t.mode, "active")
         self.assertEqual(self.t.current_project, "alpha")

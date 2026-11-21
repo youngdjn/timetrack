@@ -23,15 +23,14 @@ DEFAULT_CONFIG_TEXT = """\
 # Minutes between "What are you working on?" prompts.
 prompt_interval_minutes = 15
 
-# Seconds without keyboard/mouse activity after which the session counts as idle.
-# Recording stops at the moment of your last activity.
-idle_threshold_seconds = 60
+# If a prompt is still unanswered after this many seconds, you're considered away:
+# the previous project's time ends at the moment the prompt appeared, and nothing is
+# recorded until you answer.
+response_timeout_seconds = 60
 
-# What happens when you come back after being idle:
-#   "assign" - prompt right away, and offer to log the time you were away to a project
-#              (e.g. a meeting); leave that field empty to not log it.
-#   "prompt" - prompt right away for what you're working on now; away time is not logged.
-on_return = "assign"
+# When you finally answer such a prompt, offer to log the unanswered stretch to a
+# project (e.g. a meeting). Leave that field empty to not log it.
+offer_to_log_away_time = true
 
 # Show the current project's name next to the tray icon.
 show_project_in_panel = true
@@ -44,8 +43,8 @@ log_file = ""
 @dataclass
 class Config:
     prompt_interval_minutes: float = 15
-    idle_threshold_seconds: float = 60
-    on_return: str = "assign"
+    response_timeout_seconds: float = 60
+    offer_to_log_away_time: bool = True
     show_project_in_panel: bool = True
     log_file: str = ""
 
@@ -78,12 +77,15 @@ def load_config(path: Path = CONFIG_FILE) -> Config:
         else:
             print(f"timetrack: config '{key}' must be a number >= {minimum}; using default")
 
+    # Settings from version 0.1 (session idle detection) map onto the new ones.
+    if "response_timeout_seconds" not in data and "idle_threshold_seconds" in data:
+        data["response_timeout_seconds"] = data["idle_threshold_seconds"]
+    if "offer_to_log_away_time" not in data and "on_return" in data:
+        data["offer_to_log_away_time"] = data["on_return"] != "prompt"
+
     num("prompt_interval_minutes", 0.1)
-    num("idle_threshold_seconds", 5)
-    if data.get("on_return", cfg.on_return) in ("assign", "prompt"):
-        cfg.on_return = data.get("on_return", cfg.on_return)
-    else:
-        print("timetrack: config 'on_return' must be \"assign\" or \"prompt\"; using default")
+    num("response_timeout_seconds", 5)
+    cfg.offer_to_log_away_time = bool(data.get("offer_to_log_away_time", True))
     cfg.show_project_in_panel = bool(data.get("show_project_in_panel", cfg.show_project_in_panel))
     cfg.log_file = str(data.get("log_file", "") or "")
     return cfg

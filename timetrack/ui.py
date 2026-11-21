@@ -196,11 +196,10 @@ class PromptWindow(Gtk.Window):
 
         self.away_picker = None
         if prompt.away:
-            a, b = prompt.away
-            mins = int(round((b - a) / 60))
+            since = prompt.away[0]
             lab = Gtk.Label(xalign=0)
-            lab.set_markup(f"<b>You were away {_hm(a)}–{_hm(b)} ({mins} min).</b>\n"
-                           "Log that time to a project? (e.g. a meeting)")
+            lab.set_markup(f"<b>No answer since {_hm(since)} \u2014 not recording.</b>\n"
+                           "Log the time from then until now to a project? (e.g. a meeting)")
             box.pack_start(lab, False, False, 0)
             self.away_picker = ProjectPicker(projects, None, "Don’t log away time",
                                              self._submit, list_height=110)
@@ -346,7 +345,7 @@ class Tray:
     def update(self, mode: str, status: str, project: Optional[str], show_label: bool):
         if not self.available:
             return
-        icon = {"active": ICON_ACTIVE, "idle": ICON_IDLE}.get(mode, ICON_OFF)
+        icon = {"active": ICON_ACTIVE, "away": ICON_IDLE}.get(mode, ICON_OFF)
         self.ind.set_icon_full(icon, status)
         self.ind.set_label(project if (show_label and mode == "active" and project) else "", "")
         self.status_item.set_label(status)

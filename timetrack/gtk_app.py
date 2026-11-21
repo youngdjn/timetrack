@@ -9,7 +9,6 @@ from gi.repository import Gio, GLib, Gtk  # noqa: E402
 
 from .app import APP_ID, POLL_SECONDS, STATE_FILE, open_path  # noqa: E402
 from .config import CONFIG_FILE, ConfigWatcher, ensure_config_file  # noqa: E402
-from .idle import IdleMonitor  # noqa: E402
 from .report import format_report  # noqa: E402
 from .storage import StateStore  # noqa: E402
 from .tracker import Tracker  # noqa: E402
@@ -24,7 +23,6 @@ class TimetrackApp(Gtk.Application):
         self.tray = None
         self.prompt_window = None
         self.report_window = None
-        self.idle = None
         self.config = None
 
     # ---- command line (runs in the primary instance) -----------------------------
@@ -80,7 +78,7 @@ class TimetrackApp(Gtk.Application):
                 if t.mode == "active":
                     import time
                     mins = max(0, int((t.next_prompt_at - time.time()) / 60 + 0.5))
-                    text += f" (next prompt in ~{mins} min; idle detection: {self.idle.backend or 'none'})"
+                    text += f" (next prompt in ~{mins} min)"
                 out(text + "\n")
             else:
                 state = StateStore(STATE_FILE)
@@ -93,7 +91,6 @@ class TimetrackApp(Gtk.Application):
     def _start_tracker(self):
         ensure_config_file()
         self.config = ConfigWatcher(CONFIG_FILE)
-        self.idle = IdleMonitor()
         self.tracker = Tracker(StateStore(STATE_FILE), self.config.get)
         self.tracker.on_show_prompt = self._show_prompt
         self.tracker.on_hide_prompt = self._hide_prompt
@@ -114,7 +111,7 @@ class TimetrackApp(Gtk.Application):
     def _tick(self):
         if self.tracker is None:
             return False
-        self.tracker.tick(self.idle.get_idle_seconds())
+        self.tracker.tick()
         self._update_tray()
         return True
 
